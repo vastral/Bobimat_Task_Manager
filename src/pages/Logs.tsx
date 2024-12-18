@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import { LogEntry } from '../types';
@@ -6,11 +6,17 @@ import { Button } from '../components/ui/Button';
 import { Select } from '../components/ui/Select';
 import TableContainer from '../components/ui/TableContainer';
 import { Loader2, FileText, Table2, FileDown } from 'lucide-react';
-import { format } from 'date-fns';
+import { format as dateFormat } from 'date-fns';
 import { es } from 'date-fns/locale';
-import * as XLSX from 'xlsx';
+import { Workbook } from 'exceljs';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+
+declare module 'jspdf' {
+  interface jsPDF {
+    autoTable: (options: any) => jsPDF;
+  }
+}
 
 export default function Logs() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -38,18 +44,40 @@ export default function Logs() {
     }
   };
 
-  const handleDownload = (format: 'csv' | 'xlsx' | 'pdf') => {
+  const handleDownload = async (format: 'csv' | 'xlsx' | 'pdf') => {
     if (logs.length === 0) {
       toast.error('No hay registros para descargar');
       return;
     }
 
     if (format === 'csv' || format === 'xlsx') {
-      const worksheet = XLSX.utils.json_to_sheet(logs);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Logs');
+      const workbook = new Workbook();
+      const sheet = workbook.addWorksheet('Logs');
+
+      // Add headers
+      sheet.addRow(['Referencia', 'Estado Anterior', 'Estado Nuevo', 'Usuario', 'Fecha']);
+
+      // Add data
+      logs.forEach((log) => {
+        sheet.addRow([
+          log.task_reference,
+          log.previous_status || '-',
+          log.new_status,
+          log.user_email,
+          dateFormat(new Date(log.timestamp), "d MMM yyyy HH:mm", { locale: es }),
+        ]);
+      });
+
+      // Save file
       const fileName = `logs_${dateRange}.${format}`;
-      XLSX.writeFile(workbook, fileName);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/octet-stream' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      window.URL.revokeObjectURL(url);
     } else if (format === 'pdf') {
       const doc = new jsPDF();
       const formattedData = logs.map((log) => [
@@ -57,7 +85,7 @@ export default function Logs() {
         log.previous_status || '-',
         log.new_status,
         log.user_email,
-        format(new Date(log.timestamp), "d MMM yyyy HH:mm", { locale: es }),
+        dateFormat(new Date(log.timestamp), "d MMM yyyy HH:mm", { locale: es }),
       ]);
       doc.autoTable({
         head: [['Referencia', 'Estado Anterior', 'Estado Nuevo', 'Usuario', 'Fecha']],
@@ -185,9 +213,9 @@ export default function Logs() {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {format(new Date(log.timestamp), "d 'de' MMMM 'de' yyyy", { locale: es })}
+                    {dateFormat(new Date(log.timestamp), "d 'de' MMMM 'de' yyyy", { locale: es })}
                     <span className="block text-xs text-gray-400">
-                      {format(new Date(log.timestamp), "HH:mm", { locale: es })}
+                      {dateFormat(new Date(log.timestamp), "HH:mm", { locale: es })}
                     </span>
                   </td>
                 </tr>
